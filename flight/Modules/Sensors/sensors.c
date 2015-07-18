@@ -49,6 +49,11 @@
 #include "magbias.h"
 #include "coordinate_conversions.h"
 
+// PIOS driver
+#if defined(PIOS_INCLUDE_MPU6000)
+#include <pios_mpu6000.h>
+#endif
+
 // Private constants
 #define STACK_SIZE_BYTES 1000
 #define TASK_PRIORITY PIOS_THREAD_PRIO_HIGH
@@ -90,6 +95,7 @@ static float mag_scale[3] = {0,0,0};
 static float accel_bias[3] = {0,0,0};
 static float accel_scale[3] = {0,0,0};
 static float gyro_scale[3] = {0,0,0};
+static uint8_t gyro_subsampling = 1;
 static float gyro_coeff_x[4] = {0,0,0,0};
 static float gyro_coeff_y[4] = {0,0,0,0};
 static float gyro_coeff_z[4] = {0,0,0,0};
@@ -560,6 +566,7 @@ static void settingsUpdatedCb(UAVObjEvent * objEv)
 	gyro_scale[0] = sensorSettings.GyroScale[SENSORSETTINGS_GYROSCALE_X];
 	gyro_scale[1] = sensorSettings.GyroScale[SENSORSETTINGS_GYROSCALE_Y];
 	gyro_scale[2] = sensorSettings.GyroScale[SENSORSETTINGS_GYROSCALE_Z];
+	gyro_subsampling = sensorSettings.GyroSubSampling;
 	gyro_coeff_x[0] =  sensorSettings.XGyroTempCoeff[0];
 	gyro_coeff_x[1] =  sensorSettings.XGyroTempCoeff[1];
 	gyro_coeff_x[2] =  sensorSettings.XGyroTempCoeff[2];
@@ -601,6 +608,10 @@ static void settingsUpdatedCb(UAVObjEvent * objEv)
 		Quaternion2R(rotationQuat, Rsb);
 		rotate = 1;
 	}
+
+#if defined(PIOS_INCLUDE_MPU6000)
+	PIOS_MPU6000_SetGyroSubSamling(gyro_subsampling);
+#endif
 
 }
 /**

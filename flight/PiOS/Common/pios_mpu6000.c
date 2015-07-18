@@ -40,9 +40,16 @@
 #include "pios_semaphore.h"
 #include "pios_thread.h"
 
+// Math libraries
+#include "misc_math.h"
+
+
 /* Private constants */
 #define MPU6000_TASK_PRIORITY	PIOS_THREAD_PRIO_HIGHEST
 #define MPU6000_TASK_STACK		484
+
+// Private variables
+static uint8_t GyroSubSamplingSetting;
 
 /* Global Variables */
 
@@ -173,6 +180,9 @@ int32_t PIOS_MPU6000_Init(uint32_t spi_id, uint32_t slave_num, const struct pios
 #endif /* PIOS_MPU6000_ACCEL */
 
 	PIOS_SENSORS_Register(PIOS_SENSOR_GYRO, pios_mpu6000_dev->gyro_queue);
+
+	// Init with no sub-sampling
+	GyroSubSamplingSetting = 1;
 
 	return 0;
 }
@@ -536,6 +546,12 @@ bool PIOS_MPU6000_IRQHandler(void)
 
 static void PIOS_MPU6000_Task(void *parameters)
 {
+	// definition & init of the gyro sub-sampling variables
+	static uint8_t gyroSubsample = 0;
+	static float gyro_filtered_x = 0.0;
+	static float gyro_filtered_y = 0.0;
+	static float gyro_filtered_z = 0.0;
+
 	while (1) {
 		//Wait for data ready interrupt
 		if (PIOS_Semaphore_Take(pios_mpu6000_dev->data_ready_sema, PIOS_SEMAPHORE_TIMEOUT_MAX) != true)
@@ -579,97 +595,132 @@ static void PIOS_MPU6000_Task(void *parameters)
 
 #if defined(PIOS_MPU6000_ACCEL)
 
+		static uint8_t gyroSampling = 0;
+
+		if (++gyroSubsample >= GyroSubSamplingSetting) {
+			gyroSampling = 1;
+		}
+
 		// Currently we only support rotations on top so switch X/Y accordingly
 		struct pios_sensor_accel_data accel_data;
 		struct pios_sensor_gyro_data gyro_data;
 
 		switch (pios_mpu6000_dev->cfg->orientation) {
 		case PIOS_MPU60X0_TOP_0DEG:
-			accel_data.y = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_XOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_XOUT_L]);
-			accel_data.x = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_YOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_YOUT_L]);
+			if (gyroSampling == 1) {
+				accel_data.y = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_XOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_XOUT_L]);
+				accel_data.x = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_YOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_YOUT_L]);
+				accel_data.z = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_ZOUT_L]);
+			}
 			gyro_data.y  = (int16_t)(mpu6000_rec_buf[IDX_GYRO_XOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_XOUT_L]);
 			gyro_data.x  = (int16_t)(mpu6000_rec_buf[IDX_GYRO_YOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_YOUT_L]);
 			gyro_data.z  = - (int16_t)(mpu6000_rec_buf[IDX_GYRO_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_ZOUT_L]);
-			accel_data.z = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_ZOUT_L]);
 			break;
 		case PIOS_MPU60X0_TOP_90DEG:
-			accel_data.y = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_YOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_YOUT_L]);
-			accel_data.x = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_XOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_XOUT_L]);
+			if (gyroSampling == 1) {
+				accel_data.y = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_YOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_YOUT_L]);
+				accel_data.x = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_XOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_XOUT_L]);
+				accel_data.z = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_ZOUT_L]);
+			}
 			gyro_data.y  = - (int16_t)(mpu6000_rec_buf[IDX_GYRO_YOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_YOUT_L]);
 			gyro_data.x  = (int16_t)(mpu6000_rec_buf[IDX_GYRO_XOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_XOUT_L]);
 			gyro_data.z  = - (int16_t)(mpu6000_rec_buf[IDX_GYRO_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_ZOUT_L]);
-			accel_data.z = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_ZOUT_L]);
 			break;
 		case PIOS_MPU60X0_TOP_180DEG:
-			accel_data.y = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_XOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_XOUT_L]);
-			accel_data.x = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_YOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_YOUT_L]);
+			if (gyroSampling == 1) {
+				accel_data.y = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_XOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_XOUT_L]);
+				accel_data.x = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_YOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_YOUT_L]);
+				accel_data.z = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_ZOUT_L]);
+			}
 			gyro_data.y  = - (int16_t)(mpu6000_rec_buf[IDX_GYRO_XOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_XOUT_L]);
 			gyro_data.x  = - (int16_t)(mpu6000_rec_buf[IDX_GYRO_YOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_YOUT_L]);
 			gyro_data.z  = - (int16_t)(mpu6000_rec_buf[IDX_GYRO_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_ZOUT_L]);
-			accel_data.z = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_ZOUT_L]);
 			break;
 		case PIOS_MPU60X0_TOP_270DEG:
-			accel_data.y = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_YOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_YOUT_L]);
-			accel_data.x = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_XOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_XOUT_L]);
+			if (gyroSampling == 1) {
+				accel_data.y = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_YOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_YOUT_L]);
+				accel_data.x = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_XOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_XOUT_L]);
+				accel_data.z = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_ZOUT_L]);
+			}
 			gyro_data.y  = (int16_t)(mpu6000_rec_buf[IDX_GYRO_YOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_YOUT_L]);
 			gyro_data.x  = - (int16_t)(mpu6000_rec_buf[IDX_GYRO_XOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_XOUT_L]);
 			gyro_data.z  = - (int16_t)(mpu6000_rec_buf[IDX_GYRO_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_ZOUT_L]);
-			accel_data.z = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_ZOUT_L]);
 			break;
 		case PIOS_MPU60X0_BOTTOM_0DEG:
-			accel_data.y = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_XOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_XOUT_L]);
-			accel_data.x = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_YOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_YOUT_L]);
+			if (gyroSampling == 1) {
+				accel_data.y = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_XOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_XOUT_L]);
+				accel_data.x = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_YOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_YOUT_L]);
+				accel_data.z = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_ZOUT_L]);
+			}
 			gyro_data.y  = - (int16_t)(mpu6000_rec_buf[IDX_GYRO_XOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_XOUT_L]);
 			gyro_data.x  = (int16_t)(mpu6000_rec_buf[IDX_GYRO_YOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_YOUT_L]);
 			gyro_data.z  = (int16_t)(mpu6000_rec_buf[IDX_GYRO_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_ZOUT_L]);
-			accel_data.z = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_ZOUT_L]);
 			break;
 		case PIOS_MPU60X0_BOTTOM_90DEG:
-			accel_data.y = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_YOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_YOUT_L]);
-			accel_data.x = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_XOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_XOUT_L]);
+			if (gyroSampling == 1) {
+				accel_data.y = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_YOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_YOUT_L]);
+				accel_data.x = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_XOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_XOUT_L]);
+				accel_data.z = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_ZOUT_L]);
+			}
 			gyro_data.y  = (int16_t)(mpu6000_rec_buf[IDX_GYRO_YOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_YOUT_L]);
 			gyro_data.x  = - (int16_t)(mpu6000_rec_buf[IDX_GYRO_XOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_XOUT_L]);
 			gyro_data.z  = (int16_t)(mpu6000_rec_buf[IDX_GYRO_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_ZOUT_L]);
-			accel_data.z = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_ZOUT_L]);
 			break;
 		case PIOS_MPU60X0_BOTTOM_180DEG:
-			accel_data.y = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_XOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_XOUT_L]);
-			accel_data.x = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_YOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_YOUT_L]);
+			if (gyroSampling == 1) {
+				accel_data.y = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_XOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_XOUT_L]);
+				accel_data.x = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_YOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_YOUT_L]);
+				accel_data.z = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_ZOUT_L]);
+			}
 			gyro_data.y  = (int16_t)(mpu6000_rec_buf[IDX_GYRO_XOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_XOUT_L]);
 			gyro_data.x  = - (int16_t)(mpu6000_rec_buf[IDX_GYRO_YOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_YOUT_L]);
 			gyro_data.z  = (int16_t)(mpu6000_rec_buf[IDX_GYRO_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_ZOUT_L]);
-			accel_data.z = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_ZOUT_L]);
 			break;
 		case PIOS_MPU60X0_BOTTOM_270DEG:
-			accel_data.y = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_YOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_YOUT_L]);
-			accel_data.x = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_XOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_XOUT_L]);
+			if (gyroSampling == 1) {
+				accel_data.y = - (int16_t)(mpu6000_rec_buf[IDX_ACCEL_YOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_YOUT_L]);
+				accel_data.x = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_XOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_XOUT_L]);
+				accel_data.z = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_ZOUT_L]);
+			}
 			gyro_data.y  = - (int16_t)(mpu6000_rec_buf[IDX_GYRO_YOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_YOUT_L]);
 			gyro_data.x  = (int16_t)(mpu6000_rec_buf[IDX_GYRO_XOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_XOUT_L]);
 			gyro_data.z  = (int16_t)(mpu6000_rec_buf[IDX_GYRO_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_ZOUT_L]);
-			accel_data.z = (int16_t)(mpu6000_rec_buf[IDX_ACCEL_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_ACCEL_ZOUT_L]);
 			break;
 		}
 
+		gyro_filtered_x += gyro_data.x;
+		gyro_filtered_y += gyro_data.y;
+		gyro_filtered_z += gyro_data.z;
 
-		int16_t raw_temp = (int16_t)(mpu6000_rec_buf[IDX_TEMP_OUT_H] << 8 | mpu6000_rec_buf[IDX_TEMP_OUT_L]);
-		float temperature = 35.0f + ((float)raw_temp + 512.0f) / 340.0f;
+		if (gyroSampling == 1) {
 
-		// Apply sensor scaling
-		float accel_scale = PIOS_MPU6000_GetAccelScale();
-		accel_data.x *= accel_scale;
-		accel_data.y *= accel_scale;
-		accel_data.z *= accel_scale;
-		accel_data.temperature = temperature;
+			int16_t raw_temp = (int16_t)(mpu6000_rec_buf[IDX_TEMP_OUT_H] << 8 | mpu6000_rec_buf[IDX_TEMP_OUT_L]);
+			float temperature = 35.0f + ((float)raw_temp + 512.0f) / 340.0f;
 
-		float gyro_scale = PIOS_MPU6000_GetGyroScale();
-		gyro_data.x *= gyro_scale;
-		gyro_data.y *= gyro_scale;
-		gyro_data.z *= gyro_scale;
-		gyro_data.temperature = temperature;
+			// Apply sensor scaling
+			float accel_scale = PIOS_MPU6000_GetAccelScale();
+			accel_data.x *= accel_scale;
+			accel_data.y *= accel_scale;
+			accel_data.z *= accel_scale;
+			accel_data.temperature = temperature;
 
-		PIOS_Queue_Send(pios_mpu6000_dev->accel_queue, &accel_data, 0);
+			float gyro_scale = PIOS_MPU6000_GetGyroScale();
+			gyro_data.x = gyro_filtered_x * gyro_scale / GyroSubSamplingSetting;
+			gyro_data.y = gyro_filtered_y * gyro_scale / GyroSubSamplingSetting;
+			gyro_data.z = gyro_filtered_z * gyro_scale / GyroSubSamplingSetting;
+			gyro_data.temperature = temperature;
 
-		PIOS_Queue_Send(pios_mpu6000_dev->gyro_queue, &gyro_data, 0);
+			// reset of the gyro sub-sampling variables
+			gyroSubsample = 0;
+			gyroSampling = 0;
+			gyro_filtered_x = 0.0;
+			gyro_filtered_y = 0.0;
+			gyro_filtered_z = 0.0;
+
+			PIOS_Queue_Send(pios_mpu6000_dev->accel_queue, &accel_data, 0);
+
+			PIOS_Queue_Send(pios_mpu6000_dev->gyro_queue, &gyro_data, 0);
+		}
 
 #else
 
@@ -696,20 +747,42 @@ static void PIOS_MPU6000_Task(void *parameters)
 
 		gyro_data.z = - (int16_t)(mpu6000_rec_buf[IDX_GYRO_ZOUT_H] << 8 | mpu6000_rec_buf[IDX_GYRO_ZOUT_L]);
 
-		int32_t raw_temp = (int16_t)(mpu6000_rec_buf[IDX_TEMP_OUT_H] << 8 | mpu6000_rec_buf[IDX_TEMP_OUT_L]);
-		float temperature = 35.0f + ((float)raw_temp + 512.0f) / 340.0f;
+		gyro_filtered_x += gyro_data.x;
+		gyro_filtered_y += gyro_data.y;
+		gyro_filtered_z += gyro_data.z;
 
-		// Apply sensor scaling
-		float gyro_scale = PIOS_MPU6000_GetGyroScale();
-		gyro_data.x *= gyro_scale;
-		gyro_data.y *= gyro_scale;
-		gyro_data.z *= gyro_scale;
-		gyro_data.temperature = temperature;
+		if (++gyroSubsample >= GyroSubSamplingSetting) {
 
-		PIOS_Queue_Send(pios_mpu6000_dev->gyro_queue, &gyro_data, 0);
+			int32_t raw_temp = (int16_t)(mpu6000_rec_buf[IDX_TEMP_OUT_H] << 8 | mpu6000_rec_buf[IDX_TEMP_OUT_L]);
+			float temperature = 35.0f + ((float)raw_temp + 512.0f) / 340.0f;
+
+			// Apply sensor scaling
+			float gyro_scale = PIOS_MPU6000_GetGyroScale();
+			gyro_data.x = gyro_filtered_x * gyro_scale / GyroSubSamplingSetting;
+			gyro_data.y = gyro_filtered_y * gyro_scale / GyroSubSamplingSetting;
+			gyro_data.z = gyro_filtered_z * gyro_scale / GyroSubSamplingSetting;
+			gyro_data.temperature = temperature;
+
+			// reset of the gyro sub-sampling variables
+			gyroSubsample = 0;
+			gyro_filtered_x = 0.0;
+			gyro_filtered_y = 0.0;
+			gyro_filtered_z = 0.0;
+
+			PIOS_Queue_Send(pios_mpu6000_dev->gyro_queue, &gyro_data, 0);
+		}
 
 #endif /* PIOS_MPU6000_ACCEL */
 	}
+}
+
+
+/**
+ * Set the gyro sub-sampling setting and store it locally for fast access without the overhead of importing a UAV Object
+ */
+void PIOS_MPU6000_SetGyroSubSamling(uint8_t gyro_subsampling)
+{
+	GyroSubSamplingSetting = bound_min_max(gyro_subsampling, 1, 255);
 }
 
 #endif

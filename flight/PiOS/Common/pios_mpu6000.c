@@ -166,7 +166,7 @@ int32_t PIOS_MPU6000_Init(uint32_t spi_id, uint32_t slave_num, const struct pios
 	/* Configure the MPU6000 Sensor */
 	PIOS_SPI_SetClockSpeed(pios_mpu6000_dev->spi_id, 100000);
 	PIOS_MPU6000_Config(cfg);
-	PIOS_SPI_SetClockSpeed(pios_mpu6000_dev->spi_id, 3000000);
+	PIOS_SPI_SetClockSpeed(pios_mpu6000_dev->spi_id, 21100000); // slightly higher then 21MHz so that it is really 21MHz after prescaler calculations
 
 	pios_mpu6000_dev->threadp = PIOS_Thread_Create(
 			PIOS_MPU6000_Task, "pios_mpu6000", MPU6000_TASK_STACK, NULL, MPU6000_TASK_PRIORITY);
@@ -712,10 +712,10 @@ static void PIOS_MPU6000_Task(void *parameters)
 			accel_data.z *= accel_scale;
 			accel_data.temperature = temperature;
 
-			float gyro_scale = PIOS_MPU6000_GetGyroScale();
-			gyro_data.x = gyro_filtered_x * gyro_scale / GyroSubSamplingSetting[1];
-			gyro_data.y = gyro_filtered_y * gyro_scale / GyroSubSamplingSetting[1];
-			gyro_data.z = gyro_filtered_z * gyro_scale / GyroSubSamplingSetting[1];
+			float gyro_scale = PIOS_MPU6000_GetGyroScale() / GyroSubSamplingSetting[1];
+			gyro_data.x = gyro_filtered_x * gyro_scale;
+			gyro_data.y = gyro_filtered_y * gyro_scale;
+			gyro_data.z = gyro_filtered_z * gyro_scale;
 			gyro_data.temperature = temperature;
 
 			// reset of the gyro sub-sampling variables
@@ -765,10 +765,10 @@ static void PIOS_MPU6000_Task(void *parameters)
 			float temperature = 35.0f + ((float)raw_temp + 512.0f) / 340.0f;
 
 			// Apply sensor scaling
-			float gyro_scale = PIOS_MPU6000_GetGyroScale();
-			gyro_data.x = gyro_filtered_x * gyro_scale / GyroSubSamplingSetting[1];
-			gyro_data.y = gyro_filtered_y * gyro_scale / GyroSubSamplingSetting[1];
-			gyro_data.z = gyro_filtered_z * gyro_scale / GyroSubSamplingSetting[1];
+			float gyro_scale = PIOS_MPU6000_GetGyroScale() / GyroSubSamplingSetting[1];
+			gyro_data.x = gyro_filtered_x * gyro_scale;
+			gyro_data.y = gyro_filtered_y * gyro_scale;
+			gyro_data.z = gyro_filtered_z * gyro_scale;
 			gyro_data.temperature = temperature;
 
 			// reset of the gyro sub-sampling variables

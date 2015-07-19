@@ -49,7 +49,7 @@
 #define MPU6000_TASK_STACK		484
 
 // Private variables
-static uint8_t GyroSubSamplingSetting;
+static uint8_t GyroSubSamplingSetting[2]; // [0]: Drop, [1]: LPF
 
 /* Global Variables */
 
@@ -182,7 +182,8 @@ int32_t PIOS_MPU6000_Init(uint32_t spi_id, uint32_t slave_num, const struct pios
 	PIOS_SENSORS_Register(PIOS_SENSOR_GYRO, pios_mpu6000_dev->gyro_queue);
 
 	// Init with no sub-sampling
-	GyroSubSamplingSetting = 1;
+	GyroSubSamplingSetting[0] = 1; // Drop
+	GyroSubSamplingSetting[1] = 1; // LPF
 
 	return 0;
 }
@@ -534,12 +535,19 @@ int32_t PIOS_MPU6000_Test(void)
 */
 bool PIOS_MPU6000_IRQHandler(void)
 {
+	static uint8_t gyroSubsampleIRQ = 0; // definition & init of the gyro sub-sampling counter, "Drop"
+
 	if (PIOS_MPU6000_Validate(pios_mpu6000_dev) != 0)
 		return false;
 
 	bool woken = false;
 
-	PIOS_Semaphore_Give_FromISR(pios_mpu6000_dev->data_ready_sema, &woken);
+	if (++gyroSubsampleIRQ >= GyroSubSamplingSetting[0]) {
+
+		gyroSubsampleIRQ = 0; // reset of the gyro sub-sampling counter
+
+		PIOS_Semaphore_Give_FromISR(pios_mpu6000_dev->data_ready_sema, &woken);
+	}
 
 	return woken;
 }
@@ -547,7 +555,7 @@ bool PIOS_MPU6000_IRQHandler(void)
 static void PIOS_MPU6000_Task(void *parameters)
 {
 	// definition & init of the gyro sub-sampling variables
-	static uint8_t gyroSubsample = 0;
+	static uint8_t gyroSubsampleTask = 0; // "LPF"
 	static float gyro_filtered_x = 0.0;
 	static float gyro_filtered_y = 0.0;
 	static float gyro_filtered_z = 0.0;
@@ -597,7 +605,7 @@ static void PIOS_MPU6000_Task(void *parameters)
 
 		static uint8_t gyroSampling = 0;
 
-		if (++gyroSubsample >= GyroSubSamplingSetting) {
+		if (++gyroSubsampleTask >= GyroSubSamplingSetting[1]) {
 			gyroSampling = 1;
 		}
 
@@ -705,13 +713,13 @@ static void PIOS_MPU6000_Task(void *parameters)
 			accel_data.temperature = temperature;
 
 			float gyro_scale = PIOS_MPU6000_GetGyroScale();
-			gyro_data.x = gyro_filtered_x * gyro_scale / GyroSubSamplingSetting;
-			gyro_data.y = gyro_filtered_y * gyro_scale / GyroSubSamplingSetting;
-			gyro_data.z = gyro_filtered_z * gyro_scale / GyroSubSamplingSetting;
+			gyro_data.x = gyro_filtered_x * gyro_scale / GyroSubSamplingSetting[1];
+			gyro_data.y = gyro_filtered_y * gyro_scale / GyroSubSamplingSetting[1];
+			gyro_data.z = gyro_filtered_z * gyro_scale / GyroSubSamplingSetting[1];
 			gyro_data.temperature = temperature;
 
 			// reset of the gyro sub-sampling variables
-			gyroSubsample = 0;
+			gyroSubsampleTask = 0;
 			gyroSampling = 0;
 			gyro_filtered_x = 0.0;
 			gyro_filtered_y = 0.0;
@@ -751,20 +759,20 @@ static void PIOS_MPU6000_Task(void *parameters)
 		gyro_filtered_y += gyro_data.y;
 		gyro_filtered_z += gyro_data.z;
 
-		if (++gyroSubsample >= GyroSubSamplingSetting) {
+		if (++gyroSubsampleTask >= GyroSubSamplingSetting[1]) {
 
 			int32_t raw_temp = (int16_t)(mpu6000_rec_buf[IDX_TEMP_OUT_H] << 8 | mpu6000_rec_buf[IDX_TEMP_OUT_L]);
 			float temperature = 35.0f + ((float)raw_temp + 512.0f) / 340.0f;
 
 			// Apply sensor scaling
 			float gyro_scale = PIOS_MPU6000_GetGyroScale();
-			gyro_data.x = gyro_filtered_x * gyro_scale / GyroSubSamplingSetting;
-			gyro_data.y = gyro_filtered_y * gyro_scale / GyroSubSamplingSetting;
-			gyro_data.z = gyro_filtered_z * gyro_scale / GyroSubSamplingSetting;
+			gyro_data.x = gyro_filtered_x * gyro_scale / GyroSubSamplingSetting[1];
+			gyro_data.y = gyro_filtered_y * gyro_scale / GyroSubSamplingSetting[1];
+			gyro_data.z = gyro_filtered_z * gyro_scale / GyroSubSamplingSetting[1];
 			gyro_data.temperature = temperature;
 
 			// reset of the gyro sub-sampling variables
-			gyroSubsample = 0;
+			gyroSubsampleTask = 0;
 			gyro_filtered_x = 0.0;
 			gyro_filtered_y = 0.0;
 			gyro_filtered_z = 0.0;
@@ -780,9 +788,10 @@ static void PIOS_MPU6000_Task(void *parameters)
 /**
  * Set the gyro sub-sampling setting and store it locally for fast access without the overhead of importing a UAV Object
  */
-void PIOS_MPU6000_SetGyroSubSamling(uint8_t gyro_subsampling)
+void PIOS_MPU6000_SetGyroSubSamling(uint8_t *gyro_subsampling)
 {
-	GyroSubSamplingSetting = bound_min_max(gyro_subsampling, 1, 255);
+	GyroSubSamplingSetting[0] = bound_min_max(gyro_subsampling[0], 1, 255);
+	GyroSubSamplingSetting[1] = bound_min_max(gyro_subsampling[1], 1, 255);
 }
 
 #endif

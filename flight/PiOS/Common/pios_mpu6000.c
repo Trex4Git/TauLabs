@@ -40,9 +40,15 @@
 #include "pios_semaphore.h"
 #include "pios_thread.h"
 
+// Math libraries
+#include "misc_math.h"
+
 /* Private constants */
 #define MPU6000_TASK_PRIORITY	PIOS_THREAD_PRIO_HIGHEST
 #define MPU6000_TASK_STACK		484
+
+// Private variables
+static uint8_t GyroSubSamplingSetting;
 
 /* Global Variables */
 
@@ -524,12 +530,19 @@ int32_t PIOS_MPU6000_Test(void)
 */
 bool PIOS_MPU6000_IRQHandler(void)
 {
+	static uint8_t gyroSubsample = 0; // definition & init of the gyro sub-sampling counter
+
 	if (PIOS_MPU6000_Validate(pios_mpu6000_dev) != 0)
 		return false;
 
 	bool woken = false;
 
-	PIOS_Semaphore_Give_FromISR(pios_mpu6000_dev->data_ready_sema, &woken);
+	if (++gyroSubsample >= GyroSubSamplingSetting) {
+
+		gyroSubsample = 0; // reset of the gyro sub-sampling counter
+
+		PIOS_Semaphore_Give_FromISR(pios_mpu6000_dev->data_ready_sema, &woken);
+	}
 
 	return woken;
 }
@@ -710,6 +723,15 @@ static void PIOS_MPU6000_Task(void *parameters)
 
 #endif /* PIOS_MPU6000_ACCEL */
 	}
+}
+
+
+/**
+ * Set the gyro sub-sampling setting and store it locally for fast access without the overhead of importing a UAV Object
+ */
+void PIOS_MPU6000_SetGyroSubSamling(uint8_t gyro_subsampling)
+{
+	GyroSubSamplingSetting = bound_min_max(gyro_subsampling, 1, 255);
 }
 
 #endif
